@@ -7,6 +7,8 @@ const mongoose = require("mongoose");
 const session = require("express-session");
 const passport = require("passport");
 const passportLocalMongoose = require("passport-local-mongoose");
+const GoogleStrategy = require("passport-google-oauth20").Strategy;
+const findOrCreate = require("mongoose-findorcreate");
 const app = express();
 
 console.log(process.env.SECRET);
@@ -39,6 +41,7 @@ const userSchema = new mongoose.Schema({
 });
 
 userSchema.plugin(passportLocalMongoose);
+userSchema.plugin(findOrCreate);
 
 // user model using the user schema
 const User = mongoose.model("User", userSchema);
@@ -47,9 +50,30 @@ passport.use(User.createStrategy());
 passport.serializeUser(User.serializeUser());
 passport.deserializeUser(User.deserializeUser());
 
+passport.use(
+  new GoogleStrategy(
+    {
+      clientID: process.env.CLIENT_ID,
+      clientSecret: process.env.CLIENT_SECRET,
+      callbackURL: "http://localhost:3000/auth/google/secrets",
+      userProfileURL: "https://www.googleapis.com/oauth2/v3/userinfo",
+    },
+    function (accessToken, refreshToken, profile, cb) {
+      User.findOrCreate({ googleId: profile.id }, function (err, user) {
+        return cb(err, user);
+      });
+    }
+  )
+);
+
 app.get("/", (req, res) => {
   res.render("home");
 });
+
+app.get("/auth/google", (req, res) => {
+  passport.authenticate("google", { scope: ["profile"] })(req, res); // Call the passport.authenticate function
+});
+
 
 app.get("/login", (req, res) => {
   res.render("login");
@@ -68,7 +92,7 @@ app.get("/secrets", (req, res) => {
 });
 
 app.get("/logout", (req, res) => {
-  req.logout(function(err) {
+  req.logout(function (err) {
     // This function will be called after logout is complete.
     if (err) {
       // Handle any errors that occurred during logout.
@@ -81,7 +105,6 @@ app.get("/logout", (req, res) => {
     }
   });
 });
-
 
 //creates new user from the register page
 app.post("/register", (req, res) => {
@@ -102,33 +125,20 @@ app.post("/register", (req, res) => {
 
 //from login.ejs accepts credentials, if they match it renders secrets.ejs
 app.post("/login", (req, res) => {
+  const user = new User({
+    username: req.body.username,
+    password: req.body.password,
+  });
 
-const user = new User({
-  username: req.body.username,
-  password: req.body.password
-});
-
-
-
-
-
-req.login(user, function(err){
-  if( err){
-    console.log(err);
-  } else{
-    passport.authenticate("local")(req, res, function () {
-      res.redirect("/secrets");
-    }); 
-  }
-})
-
-
-
-
-
-
-
-
+  req.login(user, function (err) {
+    if (err) {
+      console.log(err);
+    } else {
+      passport.authenticate("local")(req, res, function () {
+        res.redirect("/secrets");
+      });
+    }
+  });
 });
 
 app.listen(3000, () => {
