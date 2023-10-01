@@ -38,6 +38,8 @@ mongoose.connect("mongodb://localhost:27017/userDB", { useNewUrlParser: true });
 const userSchema = new mongoose.Schema({
   email: String,
   password: String,
+  googleId: String,
+  secret: String,
 });
 
 userSchema.plugin(passportLocalMongoose);
@@ -47,8 +49,21 @@ userSchema.plugin(findOrCreate);
 const User = mongoose.model("User", userSchema);
 
 passport.use(User.createStrategy());
-passport.serializeUser(User.serializeUser());
-passport.deserializeUser(User.deserializeUser());
+
+passport.serializeUser(function (user, done) {
+  done(null, user.id);
+});
+passport.deserializeUser(function (id, done) {
+  User.findById(id)
+    .then((user) => {
+      done(null, user); // Fixed: Pass null for error and user for the user object
+    })
+    .catch((err) => {
+      done(err, null); // Pass the error and null for user
+    });
+});
+
+
 
 passport.use(
   new GoogleStrategy(
@@ -70,10 +85,19 @@ app.get("/", (req, res) => {
   res.render("home");
 });
 
-app.get("/auth/google", (req, res) => {
-  passport.authenticate("google", { scope: ["profile"] })(req, res); // Call the passport.authenticate function
-});
+app.get(
+  "/auth/google",
+  passport.authenticate("google", { scope: ["profile"] }) // Call the passport.authenticate function
+);
 
+app.get(
+  "/auth/google/secrets",
+  passport.authenticate("google", { failureRedirect: "/login" }),
+  function (req, res) {
+    // Successful authentication, redirect home.
+    res.redirect("/secrets");
+  }
+);
 
 app.get("/login", (req, res) => {
   res.render("login");
@@ -84,11 +108,47 @@ app.get("/register", (req, res) => {
 });
 
 app.get("/secrets", (req, res) => {
+  User.find({ secret: { $ne: null } })
+    .then(foundUsers => {
+      res.render("secrets", { usersWithSecrets: foundUsers });
+    })
+    .catch(err => {
+      console.error(err);
+      res.status(500).send("Internal Server Error");
+    });
+});
+
+app.get("/submit", (req, res) => {
   if (req.isAuthenticated()) {
-    res.render("secrets");
+    res.render("submit");
   } else {
     res.redirect("/login");
   }
+});
+
+app.post("/submit", (req, res) => {
+  const submittedSecret = req.body.secret;
+
+  User.findById(req.user.id)
+    .then((foundUser) => {
+      if (foundUser) {
+        foundUser.secret = submittedSecret;
+        foundUser.save()
+          .then(() => {
+            res.redirect("/secrets");
+          })
+
+          .catch((err) => {
+            console.log(err);
+          });
+      } else {
+        console.log("no user");
+      }
+    })
+    .catch((err) => {
+      console.log(err);
+      // Handle the error here
+    });
 });
 
 app.get("/logout", (req, res) => {
